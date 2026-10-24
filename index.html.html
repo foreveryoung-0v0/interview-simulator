@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反内耗·压力面模拟器</title>
+    <script src="https://cdn.bootcdn.net/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <style>
+        body { margin: 0; padding: 20px; background: #f0f2f5; font-family: system-ui; display: flex; gap: 20px; height: 100vh; box-sizing: border-box; }
+        .left-panel { width: 35%; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 15px; }
+        .left-panel h2 { margin: 0; font-size: 18px; color: #333; }
+        input, textarea, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: inherit; font-size: 14px;}
+        textarea { flex: 1; resize: none; }
+        button { background: #3b82f6; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        .right-panel { flex: 1; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        #chatBox { flex: 1; border: 1px solid #eee; border-radius: 8px; padding: 15px; overflow-y: auto; margin-bottom: 15px; background: #fafafa; }
+        .message { margin: 10px 0; padding: 10px 15px; border-radius: 8px; max-width: 85%; line-height: 1.5; word-wrap: break-word; }
+        .user-message { background: #dbeafe; margin-left: auto; text-align: right; }
+        .ai-message { background: #f3f4f6; margin-right: auto; }
+        .input-area { display: flex; gap: 10px; }
+        .input-area input { flex: 1; }
+        .ai-message h2 { font-size: 18px; margin-top: 10px; margin-bottom: 5px; color: #111; }
+        .ai-message h3 { font-size: 16px; margin-top: 10px; margin-bottom: 5px; color: #333; }
+        .ai-message strong { color: #000; }
+        .ai-message p { margin: 5px 0; }
+    </style>
+</head>
+<body>
+
+    <div class="left-panel">
+        <h2>1. 填写目标与简历</h2>
+        <input type="text" id="jobInput" placeholder="目标岗位（如：新媒体运营实习生）">
+        <textarea id="resumeInput" placeholder="把你的简历内容复制粘贴在这里..."></textarea>
+        
+        <select id="modeSelect">
+            <option value="pressure">🔥 高压模式（毒舌HR）</option>
+            <option value="gentle">🌸 温和模式（鼓励型HR）</option>
+        </select>
+
+        <button onclick="startInterview()">开始面试</button>
+    </div>
+
+    <div class="right-panel">
+        <div id="chatBox">
+            <div class="message ai-message">你好，请先在左侧填写你的简历，选择面试模式，然后点击“开始面试”。</div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="输入你的回答..." onkeypress="if(event.key === 'Enter') sendMessage()">
+            <button onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        // ======== 配置区 ========
+        // 【必须改】请把你的 sk- 开头的 Key 填到下面单引号中间！
+        const API_KEY = '这里填你的Key'; 
+        const API_URL = 'https://api.deepseek.com/chat/completions';
+        const MODEL_NAME = 'deepseek-chat';
+        
+        let messages = [];
+
+        const PROMPT_PRESSURE = `你是一位互联网大厂的资深压力面HR，风格犀利、直接、不近人情，完全拒绝“温和鼓励”。你的任务是根据候选人的简历进行深度追问。
+【规则】1.不要给答案。2.揪住简历细节死磕。3.回答含糊就指出漏洞。4.每次只问一个致命问题。
+5.当用户输入“结束面试”时，输出：面试打分（0-100分）、简历修改建议、高情商标准回答。`;
+
+        const PROMPT_GENTLE = `你是一位温柔耐心的HR，主要帮助大学生克服面试紧张。
+【规则】1.根据简历温和提问。2.如果回答得不好，微笑着给引导。3.每次只问一个问题。
+4.当用户输入“结束面试”时，输出：面试打分（0-100分，尽量多给高分）、简历优化建议、回答示范。`;
+
+        function addMessage(role, text) {
+            const chatBox = document.getElementById('chatBox');
+            const div = document.createElement('div');
+            div.className = `message ${role === 'user' ? 'user-message' : 'ai-message'}`;
+            
+            if(role === 'ai' && typeof marked !== 'undefined') {
+                try { div.innerHTML = marked.parse(text); } 
+                catch(e) { div.innerText = text; }
+            } else {
+                div.innerText = text;
+            }
+            
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            return div;
+        }
+
+        function startInterview() {
+            const job = document.getElementById('jobInput').value;
+            const resume = document.getElementById('resumeInput').value;
+            const mode = document.getElementById('modeSelect').value;
+            
+            if (!job || !resume) {
+                alert("请把目标岗位和简历填完整哦！");
+                return;
+            }
+
+            const currentPrompt = mode === 'pressure' ? PROMPT_PRESSURE : PROMPT_GENTLE;
+
+            document.getElementById('chatBox').innerHTML = '';
+            messages = [
+                { role: 'system', content: currentPrompt },
+                { role: 'user', content: `我应聘的岗位是：${job}。这是我的简历：${resume}。请开始面试。` }
+            ];
+            
+            addMessage('user', `【已提交简历，当前模式：${mode === 'pressure' ? '高压' : '温和'}】`);
+            fetchAIResponse();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage('user', text);
+            messages.push({ role: 'user', content: text });
+            input.value = '';
+
+            fetchAIResponse();
+        }
+
+        async function fetchAIResponse() {
+            const lastMsgDiv = addMessage('ai', 'HR正在思考...');
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: MODEL_NAME,
+                        messages: messages
+                    })
+                });
+
+                const data = await response.json();
+                if (data.choices && data.choices.length > 0) {
+                    const reply = data.choices[0].message.content;
+                    
+                    if (typeof marked !== 'undefined') {
+                        lastMsgDiv.innerHTML = marked.parse(reply);
+                    } else {
+                        lastMsgDiv.innerText = reply;
+                    }
+                    
+                    messages.push({ role: 'assistant', content: reply });
+                } else {
+                    lastMsgDiv.innerText = "接口返回错误：" + JSON.stringify(data);
+                }
+            } catch (error) {
+                lastMsgDiv.innerText = "网络请求失败，请检查网络或API配置。";
+            }
+        }
+    </script>
+</body>
+</html>
